@@ -1,0 +1,52 @@
+---
+- hosts: fortios
+  vars_prompt:
+    - name: username
+      prompt: "Username?"
+      private: no
+    - name: password
+      prompt: "Password?"
+  gather_facts: false
+  connection: local
+  name: FortiGate backup playbook
+  vars:
+    verify: false
+    secure: true
+    local_git_repo_path: "~/config_backups"
+
+  tasks:
+    - name: Get cookie from Fortigate
+      uri:
+        url: "https://{{ ansible_host }}/logincheck"
+        validate_certs: no
+        method: POST
+        body_format: raw
+        body: "username={{ username}}&secretkey={{ password }}"
+      register: login
+    - name: Get Fortigate Config
+      uri:
+        url: "https://{{ ansible_host }}/api/v2/monitor/system/config/backup/?scope=global"
+        return_content: yes
+        validate_certs: no
+        body_format: json
+        headers:
+            Accept: "application/json"
+            Cookie: "{{ login.set_cookie }}"
+      register: current_config
+
+    - name: Write config to local file
+      local_action: copy content={{ current_config.content }} dest={{ local_git_repo_path }}/{{ inventory_hostname }}.conf
+
+- name: Commit config changes to GIT
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tags: git
+  tasks:
+    - name: Commit changes to git
+      shell: |
+        git add .
+        git commit -m "Config snapshot taken $(date +"%Y-%m-%d %H:%M:%S")"
+        exit 0
+      args:
+        chdir: "{{ local_git_repo_path }}"
